@@ -11,6 +11,7 @@ enum BLEAction {
 
 @MainActor
 final class TTLockBLEManager: NSObject, ObservableObject {
+    @Published var isPoweredOn = false
     @Published var isScanning = false
     @Published var isBusy = false
     @Published var statusText = "就绪"
@@ -55,6 +56,31 @@ final class TTLockBLEManager: NSObject, ObservableObject {
     func stopScan() {
         centralManager.stopScan()
         isScanning = false
+    }
+
+    /// 启动或切换门锁时自动连接并同步状态
+    func syncLockState(for lock: SmartLock, resetDisplay: Bool = true) {
+        timeoutTask?.cancel()
+        centralManager.stopScan()
+        if let p = activePeripheral {
+            centralManager.cancelPeripheralConnection(p)
+        }
+        activePeripheral = nil
+        txCharacteristic = nil
+        rxCharacteristic = nil
+        isBusy = false
+
+        if resetDisplay {
+            lockState = .unknown
+            batteryLevel = nil
+        }
+
+        guard centralManager.state == .poweredOn else {
+            statusText = "等待蓝牙就绪..."
+            return
+        }
+
+        execute(.queryStatus, on: lock)
     }
 
     func execute(_ action: BLEAction, on lock: SmartLock) {
@@ -140,7 +166,6 @@ final class TTLockBLEManager: NSObject, ObservableObject {
 
         switch parsed.command {
         case TTLockCommand.checkUserTime.rawValue:
-            // 提取 4 字节随机挑战数
             guard parsed.data.count >= 6 else {
                 finishOperation(message: "鉴权响应异常", success: false)
                 return
@@ -177,7 +202,7 @@ final class TTLockBLEManager: NSObject, ObservableObject {
         case TTLockCommand.getStatus.rawValue:
             let stateByte = parsed.data.count > 3 ? parsed.data[3] : 2
             lockState = (stateByte == 0) ? .locked : (stateByte == 1 ? .unlocked : .unknown)
-            finishOperation(message: "状态已更新: \(lockState.rawValue)", success: true)
+            finishOperation(message: "状态已同步: \(lockState.rawValue)", success: true)
 
         case TTLockCommand.correctTime.rawValue:
             finishOperation(message: "门锁时钟已校准", success: true)
@@ -191,15 +216,18 @@ final class TTLockBLEManager: NSObject, ObservableObject {
 extension TTLockBLEManager: CBCentralManagerDelegate {
     nonisolated func centralManagerDidUpdateState(_ central: CBCentralManager) {
         Task { @MainActor in
-            if central.state != .poweredOn {
+            let poweredOn = (central.state == .poweredOn)
+            self.isPoweredOn = poweredOn
+            if !poweredOn {
                 statusText = "蓝牙未开启"
                 isBusy = false
+            } else if statusText == "蓝牙未开启" || statusText == "等待蓝牙就绪..." {
+                statusText = "就绪"
             }
         }
     }
 
     nonisolated func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral, advertisementData: [String: Any], rssi RSSI: NSNumber) {
-        // 解析通通锁 ManufacturerData (17字节，末尾6字节倒序为真实MAC)
         guard let mfgData = advertisementData[CBAdvertisementDataManufacturerDataKey] as? Data else { return }
         let bytes = [UInt8](mfgData)
         guard bytes.count >= 17 else { return }
@@ -231,7 +259,6 @@ extension TTLockBLEManager: CBCentralManagerDelegate {
                 discoveredLocks.append(item)
             }
 
-            // 如果正在执行控制动作，匹配到目标 MAC 后立即停止扫描并连接
             if isBusy, let target = targetLock, target.macAddress.uppercased() == macStr {
                 centralManager.stopScan()
                 statusText = "已发现门锁，正在建立连接..."
@@ -286,7 +313,7 @@ extension TTLockBLEManager: CBPeripheralDelegate {
         Task { @MainActor in
             guard characteristic.uuid == rxUUID, characteristic.isNotifying else { return }
             if pendingAction == .queryStatus {
-                statusText = "正在查询门锁状态..."
+                statusText = "正在同步门锁状态..."
                 sendCommand(.getStatus, payload: [])
             } else {
                 statusText = "正在进行安全握手..."

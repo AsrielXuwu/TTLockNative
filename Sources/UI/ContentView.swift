@@ -43,6 +43,24 @@ struct ContentView: View {
             .sheet(isPresented: $showManageSheet) {
                 ManageLocksView()
             }
+            // 启动时自动连接并同步当前选中门锁状态
+            .onAppear {
+                if let lock = store.selectedLock, ble.lockState == .unknown, !ble.isBusy {
+                    ble.syncLockState(for: lock, resetDisplay: true)
+                }
+            }
+            // 蓝牙适配器初始化完成变为可用时自动触发一次同步
+            .onChange(of: ble.isPoweredOn) { _, isOn in
+                if isOn, !showAddSheet, let lock = store.selectedLock {
+                    ble.syncLockState(for: lock, resetDisplay: false)
+                }
+            }
+            // 每次切换门锁时自动连接并同步新门锁状态
+            .onChange(of: store.selectedLockId) { _, _ in
+                if !showAddSheet, let lock = store.selectedLock {
+                    ble.syncLockState(for: lock, resetDisplay: true)
+                }
+            }
         }
     }
 
@@ -88,10 +106,8 @@ struct ContentView: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
-            .background(.regularMaterial, in: Capsule())
-            .overlay {
-                Capsule()
-                    .strokeBorder(Color(uiColor: .separator).opacity(0.5), lineWidth: 0.5)
+            .background {
+                LiquidGlassShapeBackground(shape: Capsule())
             }
         }
     }
@@ -100,10 +116,45 @@ struct ContentView: View {
 
     private func lockControlList(for lock: SmartLock) -> some View {
         List {
-            // 四宫格卡片控制区（与下方分组卡片左右对齐）
+            // 顶部原生大锁图标状态展示区
+            Section {
+                VStack(spacing: 14) {
+                    ZStack {
+                        LiquidGlassShapeBackground(shape: Circle(), accentTint: lockStateColor)
+                            .frame(width: 92, height: 92)
+
+                        Image(systemName: lockHeroSymbolName)
+                            .font(.system(size: 40, weight: .medium))
+                            .foregroundStyle(lockStateColor)
+                            .contentTransition(.symbolEffect(.replace))
+                    }
+
+                    VStack(spacing: 4) {
+                        Text(ble.lockState.rawValue)
+                            .font(.title2.weight(.bold))
+                            .foregroundStyle(.primary)
+
+                        HStack(spacing: 6) {
+                            if ble.isBusy {
+                                ProgressView()
+                                    .controlSize(.mini)
+                            }
+                            Text(ble.statusText)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 6)
+                .listRowBackground(Color.clear)
+                .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
+            }
+
+            // 四宫格液态玻璃卡片按钮区
             Section {
                 LazyVGrid(columns: gridColumns, spacing: 12) {
-                    actionTile(
+                    liquidGlassActionTile(
                         title: "开锁",
                         subtitle: ble.isBusy ? "通信中..." : "蓝牙解锁",
                         systemImage: "lock.open.fill",
@@ -112,7 +163,7 @@ struct ContentView: View {
                         ble.execute(.unlock, on: lock)
                     }
 
-                    actionTile(
+                    liquidGlassActionTile(
                         title: "闭锁",
                         subtitle: "立即上锁",
                         systemImage: "lock.fill",
@@ -121,16 +172,16 @@ struct ContentView: View {
                         ble.execute(.lock, on: lock)
                     }
 
-                    actionTile(
+                    liquidGlassActionTile(
                         title: "状态",
-                        subtitle: "读取锁态与电量",
+                        subtitle: "同步锁态与电量",
                         systemImage: "arrow.clockwise",
                         tint: .teal
                     ) {
                         ble.execute(.queryStatus, on: lock)
                     }
 
-                    actionTile(
+                    liquidGlassActionTile(
                         title: "校时",
                         subtitle: "同步手机时间",
                         systemImage: "clock.fill",
@@ -141,14 +192,14 @@ struct ContentView: View {
                 }
                 .disabled(ble.isBusy)
                 .listRowBackground(Color.clear)
-                .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
+                .listRowInsets(EdgeInsets(top: 2, leading: 0, bottom: 4, trailing: 0))
             }
 
-            // 门锁状态（与设备信息保持完全一致的原生紧凑行高与分割线）
+            // 门锁状态（紧凑原生行高与完整分割线）
             Section("门锁状态") {
                 LabeledContent("当前状态") {
                     Text(ble.lockState.rawValue)
-                        .foregroundStyle(lockStateColor)
+                        .foregroundStyle(lockRowValueColor)
                 }
 
                 LabeledContent("电池电量") {
@@ -206,9 +257,9 @@ struct ContentView: View {
         .listStyle(.insetGrouped)
     }
 
-    // MARK: - 原生 Apple Home 风格四宫格卡片按钮
+    // MARK: - 液态玻璃四宫格卡片按钮
 
-    private func actionTile(
+    private func liquidGlassActionTile(
         title: String,
         subtitle: String,
         systemImage: String,
@@ -218,12 +269,14 @@ struct ContentView: View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: 14) {
                 HStack {
-                    Image(systemName: systemImage)
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(tint)
-                        .frame(width: 34, height: 34)
-                        .background(tint.opacity(0.14), in: Circle())
-
+                    ZStack {
+                        Circle()
+                            .fill(tint.opacity(0.15))
+                            .frame(width: 36, height: 36)
+                        Image(systemName: systemImage)
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(tint)
+                    }
                     Spacer()
                 }
 
@@ -241,7 +294,7 @@ struct ContentView: View {
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .buttonStyle(LiquidGlassTileButtonStyle())
+        .buttonStyle(LiquidGlassCardButtonStyle(tint: tint))
     }
 
     // MARK: - 原生空状态页面
@@ -261,7 +314,25 @@ struct ContentView: View {
         }
     }
 
+    // MARK: - 原生锁图标与状态配色
+
+    private var lockHeroSymbolName: String {
+        switch ble.lockState {
+        case .unlocked: return "lock.open.fill"
+        case .locked: return "lock.fill"
+        case .unknown: return "lock.shield.fill"
+        }
+    }
+
     private var lockStateColor: Color {
+        switch ble.lockState {
+        case .unlocked: return .green
+        case .locked: return .blue
+        case .unknown: return .secondary
+        }
+    }
+
+    private var lockRowValueColor: Color {
         switch ble.lockState {
         case .unlocked: return .green
         case .locked: return .primary
