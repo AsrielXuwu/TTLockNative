@@ -1,20 +1,17 @@
 import SwiftUI
 
-struct LiquidGlassSurface: ViewModifier {
-    var cornerRadius: CGFloat = 20
+struct LiquidGlassTileButtonStyle: ButtonStyle {
+    var cornerRadius: CGFloat = 16
 
-    func body(content: Content) -> some View {
-        content
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                     .strokeBorder(Color(uiColor: .separator).opacity(0.45), lineWidth: 0.5)
             }
-    }
-}
-
-extension View {
-    func liquidGlassSurface(cornerRadius: CGFloat = 20) -> some View {
-        modifier(LiquidGlassSurface(cornerRadius: cornerRadius))
+            .opacity(configuration.isPressed ? 0.72 : 1.0)
+            .scaleEffect(configuration.isPressed ? 0.97 : 1.0)
+            .animation(.easeOut(duration: 0.16), value: configuration.isPressed)
     }
 }

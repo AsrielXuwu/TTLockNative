@@ -6,6 +6,11 @@ struct ContentView: View {
     @State private var showAddSheet = false
     @State private var showManageSheet = false
 
+    private let gridColumns = [
+        GridItem(.flexible(), spacing: 12),
+        GridItem(.flexible(), spacing: 12)
+    ]
+
     var body: some View {
         NavigationStack {
             Group {
@@ -95,101 +100,62 @@ struct ContentView: View {
 
     private func lockControlList(for lock: SmartLock) -> some View {
         List {
-            // 核心控制区
+            // 四宫格卡片控制区（与下方分组卡片左右对齐）
             Section {
-                VStack(spacing: 20) {
-                    // 状态图标与文案
-                    VStack(spacing: 10) {
-                        ZStack {
-                            Circle()
-                                .fill(.regularMaterial)
-                                .frame(width: 80, height: 80)
-                                .overlay {
-                                    Circle()
-                                        .strokeBorder(Color(uiColor: .separator).opacity(0.5), lineWidth: 0.5)
-                                }
-
-                            Image(systemName: lockSymbolName)
-                                .font(.system(size: 34, weight: .medium))
-                                .foregroundStyle(lockSymbolColor)
-                                .contentTransition(.symbolEffect(.replace))
-                        }
-
-                        VStack(spacing: 4) {
-                            Text(ble.lockState.rawValue)
-                                .font(.title3.weight(.semibold))
-                                .foregroundStyle(.primary)
-
-                            Text(ble.statusText)
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .padding(.top, 8)
-
-                    // 主开锁按钮（原生大号胶囊突出按钮）
-                    Button {
+                LazyVGrid(columns: gridColumns, spacing: 12) {
+                    actionTile(
+                        title: "开锁",
+                        subtitle: ble.isBusy ? "通信中..." : "蓝牙解锁",
+                        systemImage: "lock.open.fill",
+                        tint: .blue
+                    ) {
                         ble.execute(.unlock, on: lock)
-                    } label: {
-                        HStack(spacing: 8) {
-                            if ble.isBusy {
-                                ProgressView()
-                                    .tint(.white)
-                            } else {
-                                Image(systemName: "lock.open.fill")
-                            }
-                            Text(ble.isBusy ? "正在通信..." : "轻点开锁")
-                                .fontWeight(.semibold)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 4)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .buttonBorderShape(.capsule)
-                    .controlSize(.large)
-                    .disabled(ble.isBusy)
 
-                    // 次级操作组（原生 ControlGroup 分段玻璃栏）
-                    ControlGroup {
-                        Button {
-                            ble.execute(.lock, on: lock)
-                        } label: {
-                            Label("闭锁", systemImage: "lock.fill")
-                        }
-
-                        Button {
-                            ble.execute(.queryStatus, on: lock)
-                        } label: {
-                            Label("状态", systemImage: "arrow.clockwise")
-                        }
-
-                        Button {
-                            ble.execute(.syncTime, on: lock)
-                        } label: {
-                            Label("校时", systemImage: "clock")
-                        }
+                    actionTile(
+                        title: "闭锁",
+                        subtitle: "立即上锁",
+                        systemImage: "lock.fill",
+                        tint: .indigo
+                    ) {
+                        ble.execute(.lock, on: lock)
                     }
-                    .controlSize(.large)
-                    .disabled(ble.isBusy)
+
+                    actionTile(
+                        title: "状态",
+                        subtitle: "读取锁态与电量",
+                        systemImage: "arrow.clockwise",
+                        tint: .teal
+                    ) {
+                        ble.execute(.queryStatus, on: lock)
+                    }
+
+                    actionTile(
+                        title: "校时",
+                        subtitle: "同步手机时间",
+                        systemImage: "clock.fill",
+                        tint: .orange
+                    ) {
+                        ble.execute(.syncTime, on: lock)
+                    }
                 }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 8)
+                .disabled(ble.isBusy)
                 .listRowBackground(Color.clear)
-                .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
+                .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
             }
 
-            // 门锁实时状态
+            // 门锁状态（与设备信息保持完全一致的原生紧凑行高与分割线）
             Section("门锁状态") {
                 LabeledContent("当前状态") {
-                    Label(ble.lockState.rawValue, systemImage: lockSymbolName)
-                        .foregroundStyle(lockSymbolColor)
+                    Text(ble.lockState.rawValue)
+                        .foregroundStyle(lockStateColor)
                 }
 
                 LabeledContent("电池电量") {
                     if let bat = ble.batteryLevel {
-                        Label("\(bat)%", systemImage: batterySymbol(for: bat))
-                            .foregroundStyle(bat > 20 ? .green : .red)
+                        Text("\(bat)%")
                             .monospacedDigit()
+                            .foregroundStyle(bat > 20 ? .green : .red)
                     } else {
                         Text("未读取")
                             .foregroundStyle(.secondary)
@@ -208,7 +174,7 @@ struct ContentView: View {
                 }
             }
 
-            // 底层设备参数与管理入口
+            // 设备信息
             Section("设备信息") {
                 LabeledContent("MAC 地址") {
                     Text(lock.macAddress)
@@ -240,6 +206,44 @@ struct ContentView: View {
         .listStyle(.insetGrouped)
     }
 
+    // MARK: - 原生 Apple Home 风格四宫格卡片按钮
+
+    private func actionTile(
+        title: String,
+        subtitle: String,
+        systemImage: String,
+        tint: Color,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack {
+                    Image(systemName: systemImage)
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(tint)
+                        .frame(width: 34, height: 34)
+                        .background(tint.opacity(0.14), in: Circle())
+
+                    Spacer()
+                }
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .buttonStyle(LiquidGlassTileButtonStyle())
+    }
+
     // MARK: - 原生空状态页面
 
     private var emptyStateView: some View {
@@ -257,31 +261,11 @@ struct ContentView: View {
         }
     }
 
-    // MARK: - 状态图标辅助属性
-
-    private var lockSymbolName: String {
-        switch ble.lockState {
-        case .unlocked: return "lock.open.fill"
-        case .locked: return "lock.fill"
-        case .unknown: return "lock.shield"
-        }
-    }
-
-    private var lockSymbolColor: Color {
+    private var lockStateColor: Color {
         switch ble.lockState {
         case .unlocked: return .green
-        case .locked: return .accentColor
+        case .locked: return .primary
         case .unknown: return .secondary
-        }
-    }
-
-    private func batterySymbol(for level: Int) -> String {
-        switch level {
-        case 80...100: return "battery.100percent"
-        case 55..<80: return "battery.75percent"
-        case 30..<55: return "battery.50percent"
-        case 10..<30: return "battery.25percent"
-        default: return "battery.0percent"
         }
     }
 }
