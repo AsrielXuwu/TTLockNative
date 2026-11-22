@@ -32,7 +32,6 @@ struct ContentView: View {
                         showAddSheet = true
                     } label: {
                         Image(systemName: "plus")
-                            .fontWeight(.semibold)
                     }
                     .accessibilityLabel("添加门锁")
                 }
@@ -43,19 +42,16 @@ struct ContentView: View {
             .sheet(isPresented: $showManageSheet) {
                 ManageLocksView()
             }
-            // 启动时自动连接并同步当前选中门锁状态
             .onAppear {
                 if let lock = store.selectedLock, ble.lockState == .unknown, !ble.isBusy {
                     ble.syncLockState(for: lock, resetDisplay: true)
                 }
             }
-            // 蓝牙适配器初始化完成变为可用时自动触发一次同步
             .onChange(of: ble.isPoweredOn) { _, isOn in
                 if isOn, !showAddSheet, let lock = store.selectedLock {
                     ble.syncLockState(for: lock, resetDisplay: false)
                 }
             }
-            // 每次切换门锁时自动连接并同步新门锁状态
             .onChange(of: store.selectedLockId) { _, _ in
                 if !showAddSheet, let lock = store.selectedLock {
                     ble.syncLockState(for: lock, resetDisplay: true)
@@ -64,7 +60,7 @@ struct ContentView: View {
         }
     }
 
-    // MARK: - 顶部原地展开的门锁切换菜单
+    // MARK: - 顶部原生门锁切换菜单（iOS 26/27 自动渲染为系统液态玻璃胶囊）
 
     private func lockSwitcherMenu(currentLock: SmartLock) -> some View {
         Menu {
@@ -90,49 +86,32 @@ struct ContentView: View {
                 Label("管理门锁...", systemImage: "slider.horizontal.3")
             }
         } label: {
-            HStack(spacing: 6) {
-                Image(systemName: "lock.fill")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.tint)
-
+            HStack(spacing: 4) {
                 Text(currentLock.name)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-
+                    .fontWeight(.semibold)
                 Image(systemName: "chevron.up.chevron.down")
-                    .font(.caption2.weight(.bold))
-                    .foregroundStyle(.secondary)
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .background {
-                LiquidGlassShapeBackground(shape: Capsule())
+                    .font(.caption2)
             }
         }
     }
 
-    // MARK: - 主界面原生分组列表
+    // MARK: - 主界面原生列表
 
     private func lockControlList(for lock: SmartLock) -> some View {
         List {
-            // 顶部原生大锁图标状态展示区
+            // 顶部原生大锁图标状态展示
             Section {
-                VStack(spacing: 14) {
-                    ZStack {
-                        LiquidGlassShapeBackground(shape: Circle(), accentTint: lockStateColor)
-                            .frame(width: 92, height: 92)
-
-                        Image(systemName: lockHeroSymbolName)
-                            .font(.system(size: 40, weight: .medium))
-                            .foregroundStyle(lockStateColor)
-                            .contentTransition(.symbolEffect(.replace))
-                    }
+                VStack(spacing: 12) {
+                    Image(systemName: lockHeroSymbolName)
+                        .font(.system(size: 38, weight: .medium))
+                        .foregroundStyle(lockStateColor)
+                        .contentTransition(.symbolEffect(.replace))
+                        .frame(width: 88, height: 88)
+                        .nativeGlassCircle()
 
                     VStack(spacing: 4) {
                         Text(ble.lockState.rawValue)
-                            .font(.title2.weight(.bold))
-                            .foregroundStyle(.primary)
+                            .font(.title2.weight(.semibold))
 
                         HStack(spacing: 6) {
                             if ble.isBusy {
@@ -146,56 +125,52 @@ struct ContentView: View {
                     }
                 }
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 6)
+                .padding(.vertical, 8)
                 .listRowBackground(Color.clear)
                 .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
             }
 
-            // 四宫格液态玻璃卡片按钮区
+            // 原生四宫格液态玻璃按钮
             Section {
                 LazyVGrid(columns: gridColumns, spacing: 12) {
-                    liquidGlassActionTile(
+                    nativeActionTile(
                         title: "开锁",
-                        subtitle: ble.isBusy ? "通信中..." : "蓝牙解锁",
                         systemImage: "lock.open.fill",
-                        tint: .blue
+                        prominent: true
                     ) {
                         ble.execute(.unlock, on: lock)
                     }
 
-                    liquidGlassActionTile(
+                    nativeActionTile(
                         title: "闭锁",
-                        subtitle: "立即上锁",
                         systemImage: "lock.fill",
-                        tint: .indigo
+                        prominent: false
                     ) {
                         ble.execute(.lock, on: lock)
                     }
 
-                    liquidGlassActionTile(
+                    nativeActionTile(
                         title: "状态",
-                        subtitle: "同步锁态与电量",
                         systemImage: "arrow.clockwise",
-                        tint: .teal
+                        prominent: false
                     ) {
                         ble.execute(.queryStatus, on: lock)
                     }
 
-                    liquidGlassActionTile(
+                    nativeActionTile(
                         title: "校时",
-                        subtitle: "同步手机时间",
-                        systemImage: "clock.fill",
-                        tint: .orange
+                        systemImage: "clock",
+                        prominent: false
                     ) {
                         ble.execute(.syncTime, on: lock)
                     }
                 }
                 .disabled(ble.isBusy)
                 .listRowBackground(Color.clear)
-                .listRowInsets(EdgeInsets(top: 2, leading: 0, bottom: 4, trailing: 0))
+                .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
             }
 
-            // 门锁状态（紧凑原生行高与完整分割线）
+            // 门锁状态
             Section("门锁状态") {
                 LabeledContent("当前状态") {
                     Text(ble.lockState.rawValue)
@@ -257,44 +232,26 @@ struct ContentView: View {
         .listStyle(.insetGrouped)
     }
 
-    // MARK: - 液态玻璃四宫格卡片按钮
+    // MARK: - 原生宫格按钮
 
-    private func liquidGlassActionTile(
+    private func nativeActionTile(
         title: String,
-        subtitle: String,
         systemImage: String,
-        tint: Color,
+        prominent: Bool,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            VStack(alignment: .leading, spacing: 14) {
-                HStack {
-                    ZStack {
-                        Circle()
-                            .fill(tint.opacity(0.15))
-                            .frame(width: 36, height: 36)
-                        Image(systemName: systemImage)
-                            .font(.system(size: 17, weight: .semibold))
-                            .foregroundStyle(tint)
-                    }
-                    Spacer()
-                }
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
-                        .font(.headline)
-                        .foregroundStyle(.primary)
-
-                    Text(subtitle)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
+            VStack(spacing: 8) {
+                Image(systemName: systemImage)
+                    .font(.title2)
+                Text(title)
+                    .font(.headline)
             }
-            .padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 14)
         }
-        .buttonStyle(LiquidGlassCardButtonStyle(tint: tint))
+        .nativeGlassButton(prominent: prominent)
+        .buttonBorderShape(.roundedRectangle(radius: 16))
     }
 
     // MARK: - 原生空状态页面
@@ -308,13 +265,11 @@ struct ContentView: View {
             Button("添加门锁") {
                 showAddSheet = true
             }
-            .buttonStyle(.borderedProminent)
+            .nativeGlassButton(prominent: true)
             .buttonBorderShape(.capsule)
             .controlSize(.large)
         }
     }
-
-    // MARK: - 原生锁图标与状态配色
 
     private var lockHeroSymbolName: String {
         switch ble.lockState {
@@ -327,7 +282,7 @@ struct ContentView: View {
     private var lockStateColor: Color {
         switch ble.lockState {
         case .unlocked: return .green
-        case .locked: return .blue
+        case .locked: return .accentColor
         case .unknown: return .secondary
         }
     }
