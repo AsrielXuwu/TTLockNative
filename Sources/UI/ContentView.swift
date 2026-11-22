@@ -15,7 +15,7 @@ struct ContentView: View {
         NavigationStack {
             Group {
                 if let lock = store.selectedLock {
-                    lockControlList(for: lock)
+                    lockControlView(for: lock)
                 } else {
                     emptyStateView
                 }
@@ -60,7 +60,7 @@ struct ContentView: View {
         }
     }
 
-    // MARK: - 顶部原生门锁切换菜单（iOS 26/27 自动渲染为系统液态玻璃胶囊）
+    // MARK: - 顶部原生门锁切换菜单
 
     private func lockSwitcherMenu(currentLock: SmartLock) -> some View {
         Menu {
@@ -95,12 +95,12 @@ struct ContentView: View {
         }
     }
 
-    // MARK: - 主界面原生列表
+    // MARK: - 主界面（无裁切滚动容器 + 原生分组卡片）
 
-    private func lockControlList(for lock: SmartLock) -> some View {
-        List {
-            // 顶部原生大锁图标状态展示
-            Section {
+    private func lockControlView(for lock: SmartLock) -> some View {
+        ScrollView {
+            VStack(spacing: 24) {
+                // 1. 顶部原生大锁图标状态展示
                 VStack(spacing: 12) {
                     Image(systemName: lockHeroSymbolName)
                         .font(.system(size: 38, weight: .medium))
@@ -125,13 +125,9 @@ struct ContentView: View {
                     }
                 }
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 8)
-                .listRowBackground(Color.clear)
-                .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
-            }
+                .padding(.top, 8)
 
-            // 原生四宫格液态玻璃按钮
-            Section {
+                // 2. 四宫格原生液态玻璃按钮（独立渲染，无外层裁切）
                 LazyVGrid(columns: gridColumns, spacing: 12) {
                     nativeActionTile(
                         title: "开锁",
@@ -166,70 +162,96 @@ struct ContentView: View {
                     }
                 }
                 .disabled(ble.isBusy)
-                .listRowBackground(Color.clear)
-                .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
-            }
 
-            // 门锁状态
-            Section("门锁状态") {
-                LabeledContent("当前状态") {
-                    Text(ble.lockState.rawValue)
-                        .foregroundStyle(lockRowValueColor)
-                }
-
-                LabeledContent("电池电量") {
-                    if let bat = ble.batteryLevel {
-                        Text("\(bat)%")
-                            .monospacedDigit()
-                            .foregroundStyle(bat > 20 ? .green : .red)
-                    } else {
-                        Text("未读取")
-                            .foregroundStyle(.secondary)
+                // 3. 门锁状态分组
+                nativeGroupedSection(title: "门锁状态") {
+                    LabeledContent("当前状态") {
+                        Text(ble.lockState.rawValue)
+                            .foregroundStyle(lockRowValueColor)
                     }
-                }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 11)
 
-                LabeledContent("蓝牙通道") {
-                    HStack(spacing: 6) {
-                        if ble.isBusy {
-                            ProgressView()
-                                .controlSize(.small)
+                    Divider()
+                        .padding(.leading, 16)
+
+                    LabeledContent("电池电量") {
+                        if let bat = ble.batteryLevel {
+                            Text("\(bat)%")
+                                .monospacedDigit()
+                                .foregroundStyle(bat > 20 ? .green : .red)
+                        } else {
+                            Text("未读取")
+                                .foregroundStyle(.secondary)
                         }
-                        Text(ble.statusText)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 11)
+
+                    Divider()
+                        .padding(.leading, 16)
+
+                    LabeledContent("蓝牙通道") {
+                        HStack(spacing: 6) {
+                            if ble.isBusy {
+                                ProgressView()
+                                    .controlSize(.small)
+                            }
+                            Text(ble.statusText)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 11)
+                }
+
+                // 4. 设备信息分组
+                nativeGroupedSection(title: "设备信息") {
+                    LabeledContent("MAC 地址") {
+                        Text(lock.macAddress)
+                            .font(.subheadline.monospaced())
                             .foregroundStyle(.secondary)
                     }
-                }
-            }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 11)
 
-            // 设备信息
-            Section("设备信息") {
-                LabeledContent("MAC 地址") {
-                    Text(lock.macAddress)
-                        .font(.subheadline.monospaced())
-                        .foregroundStyle(.secondary)
-                }
+                    Divider()
+                        .padding(.leading, 16)
 
-                LabeledContent("协议版本") {
-                    Text("V\(lock.protocolVersion) · Type \(lock.protocolType) · Scene \(lock.scene)")
-                        .foregroundStyle(.secondary)
-                }
-
-                Button {
-                    showManageSheet = true
-                } label: {
-                    HStack {
-                        Text("管理已保存门锁")
-                            .foregroundStyle(.primary)
-                        Spacer()
-                        Text("\(store.locks.count) 把")
+                    LabeledContent("协议版本") {
+                        Text("V\(lock.protocolVersion) · Type \(lock.protocolType) · Scene \(lock.scene)")
                             .foregroundStyle(.secondary)
-                        Image(systemName: "chevron.right")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.tertiary)
                     }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 11)
+
+                    Divider()
+                        .padding(.leading, 16)
+
+                    Button {
+                        showManageSheet = true
+                    } label: {
+                        HStack {
+                            Text("管理已保存门锁")
+                                .foregroundStyle(.primary)
+                            Spacer()
+                            Text("\(store.locks.count) 把")
+                                .foregroundStyle(.secondary)
+                            Image(systemName: "chevron.right")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.tertiary)
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 11)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
                 }
             }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 28)
         }
-        .listStyle(.insetGrouped)
+        .background(Color(uiColor: .systemGroupedBackground).ignoresSafeArea())
     }
 
     // MARK: - 原生宫格按钮
@@ -252,6 +274,28 @@ struct ContentView: View {
         }
         .nativeGlassButton(prominent: prominent)
         .buttonBorderShape(.roundedRectangle(radius: 16))
+    }
+
+    // MARK: - 原生分组卡片容器
+
+    private func nativeGroupedSection<Content: View>(
+        title: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 16)
+
+            VStack(spacing: 0) {
+                content()
+            }
+            .background(
+                Color(uiColor: .secondarySystemGroupedBackground),
+                in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+            )
+        }
     }
 
     // MARK: - 原生空状态页面
