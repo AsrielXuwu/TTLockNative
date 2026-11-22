@@ -5,6 +5,7 @@ struct ContentView: View {
     @EnvironmentObject var ble: TTLockBLEManager
     @State private var showAddSheet = false
     @State private var showManageSheet = false
+    @State private var heroCollapseProgress: CGFloat = 0
 
     private let gridColumns = [
         GridItem(.flexible(), spacing: 12),
@@ -25,6 +26,27 @@ struct ContentView: View {
                 ToolbarItem(placement: .topBarLeading) {
                     if let lock = store.selectedLock {
                         lockSwitcherMenu(currentLock: lock)
+                    }
+                }
+                ToolbarItem(placement: .principal) {
+                    if let lock = store.selectedLock {
+                        let appear = max(0, (heroCollapseProgress - 0.35) / 0.65)
+                        Button {
+                            let action: BLEAction = (ble.lockState == .unlocked) ? .lock : .unlock
+                            ble.execute(action, on: lock)
+                        } label: {
+                            Image(systemName: lockHeroSymbolName)
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(lockStateColor)
+                                .contentTransition(.symbolEffect(.replace))
+                                .frame(width: 34, height: 34)
+                        }
+                        .nativeGlassButton(prominent: false)
+                        .buttonBorderShape(.circle)
+                        .disabled(ble.isBusy || appear < 0.2)
+                        .scaleEffect(0.5 + 0.5 * appear)
+                        .opacity(appear)
+                        .accessibilityLabel(ble.lockState == .unlocked ? "闭锁" : "开锁")
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
@@ -100,8 +122,9 @@ struct ContentView: View {
     private func lockControlView(for lock: SmartLock) -> some View {
         ScrollView {
             VStack(spacing: 24) {
-                // 1. 顶部原生大锁图标状态展示（点击自动切换开/闭锁）
+                // 1. 顶部原生大锁图标状态展示（随页面上滑缩小并收入顶栏中央）
                 VStack(spacing: 12) {
+                    let heroFade = 1.0 - max(0, (heroCollapseProgress - 0.35) / 0.65)
                     Button {
                         let action: BLEAction = (ble.lockState == .unlocked) ? .lock : .unlock
                         ble.execute(action, on: lock)
@@ -114,7 +137,17 @@ struct ContentView: View {
                     }
                     .nativeGlassButton(prominent: false)
                     .buttonBorderShape(.circle)
-                    .disabled(ble.isBusy)
+                    .disabled(ble.isBusy || heroCollapseProgress > 0.5)
+                    .scaleEffect(1.0 - 0.55 * heroCollapseProgress, anchor: .bottom)
+                    .opacity(heroFade)
+                    .background {
+                        GeometryReader { geo in
+                            Color.clear.preference(
+                                key: HeroLockScrollOffsetKey.self,
+                                value: geo.frame(in: .named("lockScroll")).minY
+                            )
+                        }
+                    }
                     .accessibilityLabel(ble.lockState == .unlocked ? "闭锁" : "开锁")
 
                     VStack(spacing: 4) {
@@ -238,6 +271,13 @@ struct ContentView: View {
             .padding(.horizontal, 20)
             .padding(.bottom, 28)
         }
+        .coordinateSpace(name: "lockScroll")
+        .onPreferenceChange(HeroLockScrollOffsetKey.self) { minY in
+            let progress = min(max((8.0 - minY) / 64.0, 0), 1)
+            if abs(heroCollapseProgress - progress) > 0.005 {
+                heroCollapseProgress = progress
+            }
+        }
         .background(Color(uiColor: .systemGroupedBackground).ignoresSafeArea())
     }
 
@@ -352,5 +392,12 @@ struct ManageLocksView: View {
                 }
             }
         }
+    }
+}
+
+private struct HeroLockScrollOffsetKey: PreferenceKey {
+    static var defaultValue: CGFloat = 8.0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
     }
 }
