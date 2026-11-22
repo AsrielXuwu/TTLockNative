@@ -14,7 +14,8 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.local.smartlock.ttlock
-        PRODUCT_NAME: 门锁控制
+        PRODUCT_NAME: TTLockNative
+        INFOPLIST_KEY_CFBundleDisplayName: 门锁控制
         MARKETING_VERSION: "1.0.0"
         CURRENT_PROJECT_VERSION: "1"
         SWIFT_VERSION: "5.0"
