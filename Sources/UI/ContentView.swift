@@ -8,72 +8,28 @@ struct ContentView: View {
 
     var body: some View {
         NavigationStack {
-            ZStack {
-                // iOS 26/27 液态环境背景光晕
-                MeshAmbientBackground(isUnlocked: ble.lockState == .unlocked)
-                    .ignoresSafeArea()
-
+            Group {
                 if let lock = store.selectedLock {
-                    ScrollView {
-                        VStack(spacing: 24) {
-                            // 顶部状态胶囊栏
-                            statusHeader(for: lock)
-
-                            // 核心液态玻璃圆形开锁交互盘
-                            unlockDial(for: lock)
-                                .padding(.vertical, 12)
-
-                            // 快捷功能控制面板（闭锁 / 状态查询 / 校准时间）
-                            quickActionsGrid(for: lock)
-
-                            // 门锁底层参数摘要卡片
-                            lockSpecCard(for: lock)
-                        }
-                        .padding(.horizontal, 20)
-                        .padding(.top, 12)
-                        .padding(.bottom, 32)
-                    }
+                    lockControlList(for: lock)
                 } else {
                     emptyStateView
                 }
             }
-            .navigationTitle(store.selectedLock?.name ?? "智能门锁")
-            .navigationBarTitleDisplayMode(.large)
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    if store.locks.count > 1 {
-                        Menu {
-                            ForEach(store.locks) { item in
-                                Button {
-                                    store.selectedLockId = item.id
-                                } label: {
-                                    Label(item.name, systemImage: item.id == store.selectedLock?.id ? "checkmark" : "lock")
-                                }
-                            }
-                        } label: {
-                            Image(systemName: "chevron.down.circle.fill")
-                                .symbolRenderingMode(.hierarchical)
-                                .font(.title3)
-                        }
+                    if let lock = store.selectedLock {
+                        lockSwitcherMenu(currentLock: lock)
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    HStack(spacing: 12) {
-                        if !store.locks.isEmpty {
-                            Button {
-                                showManageSheet = true
-                            } label: {
-                                Image(systemName: "list.bullet")
-                            }
-                        }
-                        Button {
-                            showAddSheet = true
-                        } label: {
-                            Image(systemName: "plus.circle.fill")
-                                .symbolRenderingMode(.hierarchical)
-                                .font(.title3)
-                        }
+                    Button {
+                        showAddSheet = true
+                    } label: {
+                        Image(systemName: "plus")
+                            .fontWeight(.semibold)
                     }
+                    .accessibilityLabel("添加门锁")
                 }
             }
             .sheet(isPresented: $showAddSheet) {
@@ -85,181 +41,252 @@ struct ContentView: View {
         }
     }
 
-    private func statusHeader(for lock: SmartLock) -> some View {
-        LiquidGlassCard(cornerRadius: 20) {
-            HStack {
-                HStack(spacing: 8) {
-                    Circle()
-                        .fill(ble.isBusy ? Color.orange : (ble.lockState == .unlocked ? Color.green : Color.blue))
-                        .frame(width: 8, height: 8)
-                    Text(ble.statusText)
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(.primary)
-                }
+    // MARK: - 顶部原地展开的门锁切换菜单
 
-                Spacer()
-
-                if let bat = ble.batteryLevel {
-                    HStack(spacing: 4) {
-                        Image(systemName: bat > 20 ? "battery.75percent" : "battery.25percent")
-                            .foregroundStyle(bat > 20 ? .green : .red)
-                        Text("\(bat)%")
-                            .font(.caption.monospacedDigit().weight(.semibold))
+    private func lockSwitcherMenu(currentLock: SmartLock) -> some View {
+        Menu {
+            Section("切换门锁") {
+                ForEach(store.locks) { item in
+                    Button {
+                        store.selectedLockId = item.id
+                    } label: {
+                        if item.id == currentLock.id {
+                            Label(item.name, systemImage: "checkmark")
+                        } else {
+                            Text(item.name)
+                        }
                     }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(.thinMaterial, in: Capsule())
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-        }
-    }
 
-    private func unlockDial(for lock: SmartLock) -> some View {
-        Button {
-            ble.execute(.unlock, on: lock)
+            Divider()
+
+            Button {
+                showManageSheet = true
+            } label: {
+                Label("管理门锁...", systemImage: "slider.horizontal.3")
+            }
         } label: {
-            ZStack {
-                Circle()
-                    .fill(.ultraThinMaterial)
-                    .frame(width: 220, height: 220)
-                    .overlay {
-                        Circle()
-                            .strokeBorder(
-                                LinearGradient(
-                                    colors: [
-                                        .white.opacity(0.8),
-                                        .white.opacity(0.15),
-                                        (ble.lockState == .unlocked ? Color.green : Color.blue).opacity(0.5)
-                                    ],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                ),
-                                lineWidth: 2
-                            )
-                    }
-                    .shadow(color: (ble.lockState == .unlocked ? Color.green : Color.blue).opacity(0.22), radius: 30, y: 12)
+            HStack(spacing: 6) {
+                Image(systemName: "lock.fill")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tint)
 
-                VStack(spacing: 12) {
-                    if ble.isBusy {
-                        ProgressView()
-                            .controlSize(.large)
-                    } else {
-                        Image(systemName: ble.lockState == .unlocked ? "lock.open.fill" : "lock.fill")
-                            .font(.system(size: 54, weight: .medium))
-                            .foregroundStyle(ble.lockState == .unlocked ? .green : .blue)
-                            .contentTransition(.symbolEffect(.replace))
-                    }
+                Text(currentLock.name)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
 
-                    Text(ble.isBusy ? "通信中..." : "轻点开锁")
-                        .font(.headline)
-                        .foregroundStyle(.primary)
-                }
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(.secondary)
             }
-        }
-        .buttonStyle(LiquidGlassButtonStyle())
-        .disabled(ble.isBusy)
-    }
-
-    private func quickActionsGrid(for lock: SmartLock) -> some View {
-        HStack(spacing: 14) {
-            actionPill(title: "闭锁", icon: "lock.shield.fill", color: .indigo) {
-                ble.execute(.lock, on: lock)
-            }
-            actionPill(title: "状态", icon: "sensor.tag.radiowaves.forward.fill", color: .teal) {
-                ble.execute(.queryStatus, on: lock)
-            }
-            actionPill(title: "校时", icon: "clock.badge.checkmark.fill", color: .orange) {
-                ble.execute(.syncTime, on: lock)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(.regularMaterial, in: Capsule())
+            .overlay {
+                Capsule()
+                    .strokeBorder(Color(uiColor: .separator).opacity(0.5), lineWidth: 0.5)
             }
         }
     }
 
-    private func actionPill(title: String, icon: String, color: Color, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            LiquidGlassCard(cornerRadius: 22) {
-                VStack(spacing: 8) {
-                    Image(systemName: icon)
-                        .font(.title2)
-                        .foregroundStyle(color)
-                    Text(title)
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(.primary)
+    // MARK: - 主界面原生分组列表
+
+    private func lockControlList(for lock: SmartLock) -> some View {
+        List {
+            // 核心控制区
+            Section {
+                VStack(spacing: 20) {
+                    // 状态图标与文案
+                    VStack(spacing: 10) {
+                        ZStack {
+                            Circle()
+                                .fill(.regularMaterial)
+                                .frame(width: 80, height: 80)
+                                .overlay {
+                                    Circle()
+                                        .strokeBorder(Color(uiColor: .separator).opacity(0.5), lineWidth: 0.5)
+                                }
+
+                            Image(systemName: lockSymbolName)
+                                .font(.system(size: 34, weight: .medium))
+                                .foregroundStyle(lockSymbolColor)
+                                .contentTransition(.symbolEffect(.replace))
+                        }
+
+                        VStack(spacing: 4) {
+                            Text(ble.lockState.rawValue)
+                                .font(.title3.weight(.semibold))
+                                .foregroundStyle(.primary)
+
+                            Text(ble.statusText)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(.top, 8)
+
+                    // 主开锁按钮（原生大号胶囊突出按钮）
+                    Button {
+                        ble.execute(.unlock, on: lock)
+                    } label: {
+                        HStack(spacing: 8) {
+                            if ble.isBusy {
+                                ProgressView()
+                                    .tint(.white)
+                            } else {
+                                Image(systemName: "lock.open.fill")
+                            }
+                            Text(ble.isBusy ? "正在通信..." : "轻点开锁")
+                                .fontWeight(.semibold)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 4)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .buttonBorderShape(.capsule)
+                    .controlSize(.large)
+                    .disabled(ble.isBusy)
+
+                    // 次级操作组（原生 ControlGroup 分段玻璃栏）
+                    ControlGroup {
+                        Button {
+                            ble.execute(.lock, on: lock)
+                        } label: {
+                            Label("闭锁", systemImage: "lock.fill")
+                        }
+
+                        Button {
+                            ble.execute(.queryStatus, on: lock)
+                        } label: {
+                            Label("状态", systemImage: "arrow.clockwise")
+                        }
+
+                        Button {
+                            ble.execute(.syncTime, on: lock)
+                        } label: {
+                            Label("校时", systemImage: "clock")
+                        }
+                    }
+                    .controlSize(.large)
+                    .disabled(ble.isBusy)
                 }
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 16)
+                .padding(.vertical, 8)
+                .listRowBackground(Color.clear)
+                .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
+            }
+
+            // 门锁实时状态
+            Section("门锁状态") {
+                LabeledContent("当前状态") {
+                    Label(ble.lockState.rawValue, systemImage: lockSymbolName)
+                        .foregroundStyle(lockSymbolColor)
+                }
+
+                LabeledContent("电池电量") {
+                    if let bat = ble.batteryLevel {
+                        Label("\(bat)%", systemImage: batterySymbol(for: bat))
+                            .foregroundStyle(bat > 20 ? .green : .red)
+                            .monospacedDigit()
+                    } else {
+                        Text("未读取")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                LabeledContent("蓝牙通道") {
+                    HStack(spacing: 6) {
+                        if ble.isBusy {
+                            ProgressView()
+                                .controlSize(.small)
+                        }
+                        Text(ble.statusText)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
+            // 底层设备参数与管理入口
+            Section("设备信息") {
+                LabeledContent("MAC 地址") {
+                    Text(lock.macAddress)
+                        .font(.subheadline.monospaced())
+                        .foregroundStyle(.secondary)
+                }
+
+                LabeledContent("协议版本") {
+                    Text("V\(lock.protocolVersion) · Type \(lock.protocolType) · Scene \(lock.scene)")
+                        .foregroundStyle(.secondary)
+                }
+
+                Button {
+                    showManageSheet = true
+                } label: {
+                    HStack {
+                        Text("管理已保存门锁")
+                            .foregroundStyle(.primary)
+                        Spacer()
+                        Text("\(store.locks.count) 把")
+                            .foregroundStyle(.secondary)
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.tertiary)
+                    }
+                }
             }
         }
-        .buttonStyle(LiquidGlassButtonStyle())
-        .disabled(ble.isBusy)
+        .listStyle(.insetGrouped)
     }
 
-    private func lockSpecCard(for lock: SmartLock) -> some View {
-        LiquidGlassCard(cornerRadius: 24) {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("设备信息")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(.secondary)
-
-                LabeledContent("MAC 地址", value: lock.macAddress)
-                    .font(.subheadline.monospaced())
-                Divider()
-                LabeledContent("协议版本", value: "V\(lock.protocolVersion) (Type \(lock.protocolType) / Scene \(lock.scene))")
-                    .font(.subheadline)
-                Divider()
-                LabeledContent("门锁状态", value: ble.lockState.rawValue)
-                    .font(.subheadline)
-            }
-            .padding(18)
-        }
-    }
+    // MARK: - 原生空状态页面
 
     private var emptyStateView: some View {
-        VStack(spacing: 20) {
-            Image(systemName: "door.left.hand.closed")
-                .font(.system(size: 64))
-                .foregroundStyle(.secondary)
-            Text("尚未添加智能门锁")
-                .font(.title3.weight(.semibold))
-            Text("支持通过扫描附近蓝牙、手动输入密钥或粘贴抓包 lockData 添加")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 40)
-            Button {
+        ContentUnavailableView {
+            Label("尚未添加智能门锁", systemImage: "door.left.hand.closed")
+        } description: {
+            Text("点击右上角“+”扫描附近通通锁蓝牙，或粘贴抓包获取的 lockData 导入。")
+        } actions: {
+            Button("添加门锁") {
                 showAddSheet = true
-            } label: {
-                Text("添加门锁")
-                    .font(.headline)
-                    .padding(.horizontal, 28)
-                    .padding(.vertical, 12)
             }
             .buttonStyle(.borderedProminent)
-            .clipShape(Capsule())
+            .buttonBorderShape(.capsule)
+            .controlSize(.large)
+        }
+    }
+
+    // MARK: - 状态图标辅助属性
+
+    private var lockSymbolName: String {
+        switch ble.lockState {
+        case .unlocked: return "lock.open.fill"
+        case .locked: return "lock.fill"
+        case .unknown: return "lock.shield"
+        }
+    }
+
+    private var lockSymbolColor: Color {
+        switch ble.lockState {
+        case .unlocked: return .green
+        case .locked: return .accentColor
+        case .unknown: return .secondary
+        }
+    }
+
+    private func batterySymbol(for level: Int) -> String {
+        switch level {
+        case 80...100: return "battery.100percent"
+        case 55..<80: return "battery.75percent"
+        case 30..<55: return "battery.50percent"
+        case 10..<30: return "battery.25percent"
+        default: return "battery.0percent"
         }
     }
 }
 
-struct MeshAmbientBackground: View {
-    var isUnlocked: Bool
-
-    var body: some View {
-        ZStack {
-            Color(uiColor: .systemGroupedBackground)
-            Circle()
-                .fill((isUnlocked ? Color.green : Color.blue).opacity(0.18))
-                .frame(width: 340, height: 340)
-                .blur(radius: 90)
-                .offset(x: -80, y: -180)
-            Circle()
-                .fill(Color.cyan.opacity(0.14))
-                .frame(width: 300, height: 300)
-                .blur(radius: 80)
-                .offset(x: 110, y: 140)
-        }
-    }
-}
+// MARK: - 门锁管理列表
 
 struct ManageLocksView: View {
     @EnvironmentObject var store: LockStore
@@ -269,29 +296,40 @@ struct ManageLocksView: View {
         NavigationStack {
             List {
                 ForEach(store.locks) { lock in
-                    HStack {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(lock.name).font(.headline)
-                            Text(lock.macAddress).font(.caption.monospaced()).foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        if store.selectedLock?.id == lock.id {
-                            Image(systemName: "checkmark.circle.fill").foregroundStyle(.blue)
-                        }
-                    }
-                    .contentShape(Rectangle())
-                    .onTapGesture {
+                    Button {
                         store.selectedLockId = lock.id
                         dismiss()
+                    } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(lock.name)
+                                    .font(.body.weight(.medium))
+                                    .foregroundStyle(.primary)
+                                Text(lock.macAddress)
+                                    .font(.caption.monospaced())
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            if store.selectedLock?.id == lock.id {
+                                Image(systemName: "checkmark")
+                                    .fontWeight(.semibold)
+                                    .foregroundStyle(.tint)
+                            }
+                        }
                     }
                 }
                 .onDelete(perform: store.delete)
             }
+            .listStyle(.insetGrouped)
             .navigationTitle("管理门锁")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    EditButton()
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("完成") { dismiss() }
+                        .fontWeight(.semibold)
                 }
             }
         }
