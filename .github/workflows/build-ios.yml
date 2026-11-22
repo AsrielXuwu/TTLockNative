@@ -1,0 +1,45 @@
+name: Build iOS IPA
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode Project
+        run: xcodegen generate
+
+      - name: Build Unsigned Archive
+        run: |
+          xcodebuild archive \
+            -project TTLockNative.xcodeproj \
+            -scheme TTLockNative \
+            -configuration Release \
+            -archivePath build/TTLockNative.xcarchive \
+            -destination "generic/platform=iOS" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY=""
+
+      - name: Package IPA
+        run: |
+          mkdir -p build/Payload
+          cp -r build/TTLockNative.xcarchive/Products/Applications/TTLockNative.app build/Payload/
+          cd build
+          zip -r TTLockNative.ipa Payload
+
+      - name: Upload IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: TTLockNative-IPA
+          path: build/TTLockNative.ipa
