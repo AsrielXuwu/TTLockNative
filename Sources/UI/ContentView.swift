@@ -100,14 +100,22 @@ struct ContentView: View {
     private func lockControlView(for lock: SmartLock) -> some View {
         ScrollView {
             VStack(spacing: 24) {
-                // 1. 顶部原生大锁图标状态展示
+                // 1. 顶部原生大锁图标状态展示（点击自动切换开/闭锁）
                 VStack(spacing: 12) {
-                    Image(systemName: lockHeroSymbolName)
-                        .font(.system(size: 38, weight: .medium))
-                        .foregroundStyle(lockStateColor)
-                        .contentTransition(.symbolEffect(.replace))
-                        .frame(width: 88, height: 88)
-                        .nativeGlassCircle()
+                    Button {
+                        let action: BLEAction = (ble.lockState == .unlocked) ? .lock : .unlock
+                        ble.execute(action, on: lock)
+                    } label: {
+                        Image(systemName: lockHeroSymbolName)
+                            .font(.system(size: 38, weight: .medium))
+                            .foregroundStyle(lockStateColor)
+                            .contentTransition(.symbolEffect(.replace))
+                            .frame(width: 72, height: 72)
+                    }
+                    .nativeGlassButton(prominent: false)
+                    .buttonBorderShape(.circle)
+                    .disabled(ble.isBusy)
+                    .accessibilityLabel(ble.lockState == .unlocked ? "闭锁" : "开锁")
 
                     VStack(spacing: 4) {
                         Text(ble.lockState.rawValue)
