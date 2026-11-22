@@ -6,7 +6,6 @@ struct ContentView: View {
     @State private var showAddSheet = false
     @State private var showManageSheet = false
     @State private var heroCollapseProgress: CGFloat = 0
-    @Namespace private var lockIconNamespace
 
     private let gridColumns = [
         GridItem(.flexible(), spacing: 12),
@@ -27,32 +26,33 @@ struct ContentView: View {
                 ToolbarItem(placement: .topBarLeading) {
                     if let lock = store.selectedLock {
                         lockSwitcherMenu(currentLock: lock)
+                            .opacity(max(1.0 - heroCollapseProgress * 2.5, 0))
                     }
                 }
                 ToolbarItem(placement: .principal) {
                     if let lock = store.selectedLock {
-                        let appear = min(max((heroCollapseProgress - 0.42) / 0.58, 0), 1)
-                        Button {
-                            let action: BLEAction = (ble.lockState == .unlocked) ? .lock : .unlock
-                            ble.execute(action, on: lock)
-                        } label: {
-                            Image(systemName: lockHeroSymbolName)
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundStyle(lockStateColor)
-                                .contentTransition(.symbolEffect(.replace))
-                                .frame(width: 34, height: 34)
-                                .matchedGeometryEffect(
-                                    id: "lock-hero-icon",
-                                    in: lockIconNamespace,
-                                    isSource: heroCollapseProgress >= 0.5
-                                )
-                                .animation(.spring(response: 0.30, dampingFraction: 0.88), value: heroCollapseProgress >= 0.5)
+                        VStack(spacing: 2) {
+                            Button {
+                                let action: BLEAction = (ble.lockState == .unlocked) ? .lock : .unlock
+                                ble.execute(action, on: lock)
+                            } label: {
+                                Image(systemName: lockHeroSymbolName)
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundStyle(lockStateColor)
+                                    .contentTransition(.symbolEffect(.replace))
+                                    .frame(width: 30, height: 30)
+                            }
+                            .nativeGlassButton(prominent: false)
+                            .buttonBorderShape(.circle)
+                            .disabled(ble.isBusy || heroCollapseProgress < 0.3)
+                            .accessibilityLabel(ble.lockState == .unlocked ? "闭锁" : "开锁")
+
+                            lockCapsuleMenu(currentLock: lock)
                         }
-                        .nativeGlassButton(prominent: false)
-                        .buttonBorderShape(.circle)
-                        .disabled(ble.isBusy || appear < 0.2)
-                        .opacity(appear)
-                        .accessibilityLabel(ble.lockState == .unlocked ? "闭锁" : "开锁")
+                        .scaleEffect(0.85 + 0.15 * heroCollapseProgress)
+                        .offset(y: (1.0 - heroCollapseProgress) * 5)
+                        .opacity(heroCollapseProgress)
+                        .allowsHitTesting(heroCollapseProgress > 0.6)
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
@@ -123,38 +123,66 @@ struct ContentView: View {
         }
     }
 
+    // MARK: - 仿 iMessage 顶栏居中胶囊切换菜单
+
+    private func lockCapsuleMenu(currentLock: SmartLock) -> some View {
+        Menu {
+            Section("切换门锁") {
+                ForEach(store.locks) { item in
+                    Button {
+                        store.selectedLockId = item.id
+                    } label: {
+                        if item.id == currentLock.id {
+                            Label(item.name, systemImage: "checkmark")
+                        } else {
+                            Text(item.name)
+                        }
+                    }
+                }
+            }
+
+            Divider()
+
+            Button {
+                showManageSheet = true
+            } label: {
+                Label("管理门锁...", systemImage: "slider.horizontal.3")
+            }
+        } label: {
+            HStack(spacing: 3) {
+                if ble.isBusy {
+                    ProgressView()
+                        .controlSize(.mini)
+                }
+                Text(currentLock.name)
+                    .font(.system(size: 12, weight: .semibold))
+                    .lineLimit(1)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.secondary)
+            }
+            .foregroundStyle(.primary)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 3)
+            .background(
+                Capsule()
+                    .fill(.ultraThinMaterial)
+                    .overlay(
+                        Capsule()
+                            .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)
+                    )
+            )
+        }
+    }
+
     // MARK: - 主界面（无裁切滚动容器 + 原生分组卡片）
 
     private func lockControlView(for lock: SmartLock) -> some View {
         ScrollView {
             VStack(spacing: 24) {
-                // 1. 顶部原生大锁图标状态展示（随页面上滑缩小并收入顶栏中央）
-                VStack(spacing: 12 * (1 - heroCollapseProgress)) {
-                    let toolbarAppear = min(max((heroCollapseProgress - 0.42) / 0.58, 0), 1)
-                    let iconSize = 72 - 38 * heroCollapseProgress
-                    let iconFontSize = 38 - 22 * heroCollapseProgress
-                    let statusHeight = 52 * (1 - heroCollapseProgress)
-
-                    Button {
-                        let action: BLEAction = (ble.lockState == .unlocked) ? .lock : .unlock
-                        ble.execute(action, on: lock)
-                    } label: {
-                        Image(systemName: lockHeroSymbolName)
-                            .font(.system(size: iconFontSize, weight: .medium))
-                            .foregroundStyle(lockStateColor)
-                            .contentTransition(.symbolEffect(.replace))
-                            .frame(width: iconSize, height: iconSize)
-                            .matchedGeometryEffect(
-                                id: "lock-hero-icon",
-                                in: lockIconNamespace,
-                                isSource: heroCollapseProgress < 0.5
-                            )
-                            .animation(.spring(response: 0.30, dampingFraction: 0.88), value: heroCollapseProgress >= 0.5)
-                    }
-                    .nativeGlassButton(prominent: false)
-                    .buttonBorderShape(.circle)
-                    .disabled(ble.isBusy || heroCollapseProgress > 0.5)
-                    .opacity(1 - toolbarAppear)
+                // 顶部滚动测量探针（无侵入测量真实滚动距离）
+                Color.clear
+                    .frame(height: 0)
                     .background {
                         GeometryReader { geo in
                             Color.clear.preference(
@@ -163,6 +191,22 @@ struct ContentView: View {
                             )
                         }
                     }
+
+                // 1. 顶部原生大锁图标与状态展示（随页面滑动进入顶栏范围时平滑收起至顶栏中央）
+                VStack(spacing: 12) {
+                    Button {
+                        let action: BLEAction = (ble.lockState == .unlocked) ? .lock : .unlock
+                        ble.execute(action, on: lock)
+                    } label: {
+                        Image(systemName: lockHeroSymbolName)
+                            .font(.system(size: 38, weight: .medium))
+                            .foregroundStyle(lockStateColor)
+                            .contentTransition(.symbolEffect(.replace))
+                            .frame(width: 72, height: 72)
+                    }
+                    .nativeGlassButton(prominent: false)
+                    .buttonBorderShape(.circle)
+                    .disabled(ble.isBusy || heroCollapseProgress > 0.6)
                     .accessibilityLabel(ble.lockState == .unlocked ? "闭锁" : "开锁")
 
                     VStack(spacing: 4) {
@@ -179,14 +223,12 @@ struct ContentView: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
-                    .frame(height: statusHeight, alignment: .top)
-                    .opacity(1 - heroCollapseProgress)
-                    .offset(y: -8 * heroCollapseProgress)
-                    .clipped()
-                    .accessibilityHidden(heroCollapseProgress > 0.85)
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.top, 8)
+                .scaleEffect(1.0 - 0.22 * heroCollapseProgress, anchor: .top)
+                .opacity(1.0 - heroCollapseProgress)
+                .allowsHitTesting(heroCollapseProgress < 0.6)
 
                 // 2. 四宫格原生液态玻璃按钮（独立渲染，无外层裁切）
                 LazyVGrid(columns: gridColumns, spacing: 12) {
@@ -293,9 +335,11 @@ struct ContentView: View {
         }
         .coordinateSpace(name: "lockScroll")
         .onPreferenceChange(HeroLockScrollOffsetKey.self) { minY in
-            // Begin collapsing as the hero approaches the navigation bar.
-            let progress = min(max((12.0 - minY) / 56.0, 0), 1)
-            if abs(heroCollapseProgress - progress) > 0.002 {
+            let scrollDistance = -minY
+            let startOffset: CGFloat = 8.0
+            let endOffset: CGFloat = 88.0
+            let progress = min(max((scrollDistance - startOffset) / (endOffset - startOffset), 0), 1)
+            if abs(heroCollapseProgress - progress) > 0.003 {
                 heroCollapseProgress = progress
             }
         }
@@ -417,7 +461,7 @@ struct ManageLocksView: View {
 }
 
 private struct HeroLockScrollOffsetKey: PreferenceKey {
-    static var defaultValue: CGFloat = 8.0
+    static var defaultValue: CGFloat = 0.0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = nextValue()
     }
