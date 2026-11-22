@@ -11,9 +11,15 @@ targets:
     platform: iOS
     sources:
       - path: Sources
+    info:
+      path: Info.plist
+      properties:
+        UIBackgroundModes:
+          - bluetooth-central
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.local.smartlock.ttlock
+        # ... 其余原有 settings 保持不变 ...
         PRODUCT_NAME: TTLockNative
         INFOPLIST_KEY_CFBundleDisplayName: 门锁控制
         MARKETING_VERSION: "1.0.0"

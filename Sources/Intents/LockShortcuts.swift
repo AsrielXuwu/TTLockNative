@@ -125,7 +125,31 @@ struct TTLockShortcutsProvider: AppShortcutsProvider {
     }
 }
 
-// MARK: - 5. 快捷指令专用后台无界面 BLE 执行器
+// MARK: - 5. 门锁 iOS 蓝牙 UUID 持久化缓存（用于后台免扫描直连）
+
+private enum PeripheralUUIDCache {
+    private static let cacheKey = "ttlock_peripheral_uuid_map_v1"
+
+    static func uuid(for mac: String) -> UUID? {
+        let map = UserDefaults.standard.dictionary(forKey: cacheKey) as? [String: String] ?? [:]
+        guard let str = map[mac.uppercased()] else { return nil }
+        return UUID(uuidString: str)
+    }
+
+    static func save(uuid: UUID, for mac: String) {
+        var map = UserDefaults.standard.dictionary(forKey: cacheKey) as? [String: String] ?? [:]
+        map[mac.uppercased()] = uuid.uuidString
+        UserDefaults.standard.set(map, forKey: cacheKey)
+    }
+
+    static func remove(for mac: String) {
+        var map = UserDefaults.standard.dictionary(forKey: cacheKey) as? [String: String] ?? [:]
+        map.removeValue(forKey: mac.uppercased())
+        UserDefaults.standard.set(map, forKey: cacheKey)
+    }
+}
+
+// MARK: - 6. 快捷指令专用后台无界面 BLE 执行器
 
 private enum ShortcutLockError: LocalizedError {
     case lockNotFound
@@ -163,7 +187,10 @@ private final class HeadlessLockBLEExecutor: NSObject, CBCentralManagerDelegate,
     private var expectedFrameLength = 0
     private var continuation: CheckedContinuation<Void, Error>?
     private var hasCompleted = false
+    private var isDirectConnecting = false
+
     private var timeoutWorkItem: DispatchWorkItem?
+    private var fallbackScanWorkItem: DispatchWorkItem?
 
     private let serviceUUID = CBUUID(string: "00001910-0000-1000-8000-00805F9B34FB")
     private let txUUID = CBUUID(string: "0000FFF2-0000-1000-8000-00805F9B34FB")
@@ -184,15 +211,26 @@ private final class HeadlessLockBLEExecutor: NSObject, CBCentralManagerDelegate,
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
             bleQueue.async {
                 self.continuation = cont
-                self.centralManager = CBCentralManager(delegate: self, queue: self.bleQueue)
+                self.centralManager = CBCentralManager(
+                    delegate: self,
+                    queue: self.bleQueue,
+                    options: [CBCentralManagerOptionShowPowerAlertKey: false]
+                )
 
+                // 后台扫描周期较长，整体超时设为 18 秒
                 let timeout = DispatchWorkItem { [weak self] in
                     self?.complete(with: .failure(ShortcutLockError.timeout))
                 }
                 self.timeoutWorkItem = timeout
-                self.bleQueue.asyncAfter(deadline: .now() + 12, execute: timeout)
+                self.bleQueue.asyncAfter(deadline: .now() + 18, execute: timeout)
             }
         }
+    }
+
+    private func startBackgroundScan() {
+        guard !hasCompleted, centralManager.state == .poweredOn else { return }
+        // 后台模式下不要传 AllowDuplicatesKey，避免系统忽略或降低扫描优先级
+        centralManager.scanForPeripherals(withServices: [serviceUUID], options: nil)
     }
 
     private func complete(with result: Result<Void, Error>) {
@@ -201,13 +239,17 @@ private final class HeadlessLockBLEExecutor: NSObject, CBCentralManagerDelegate,
 
         timeoutWorkItem?.cancel()
         timeoutWorkItem = nil
+        fallbackScanWorkItem?.cancel()
+        fallbackScanWorkItem = nil
 
         if centralManager?.state == .poweredOn {
             centralManager.stopScan()
         }
         if let p = activePeripheral {
+            p.delegate = nil
             centralManager.cancelPeripheralConnection(p)
         }
+        centralManager?.delegate = nil
         activePeripheral = nil
         txCharacteristic = nil
         rxCharacteristic = nil
@@ -269,11 +311,33 @@ private final class HeadlessLockBLEExecutor: NSObject, CBCentralManagerDelegate,
         guard !hasCompleted else { return }
         switch central.state {
         case .poweredOn:
-            central.scanForPeripherals(withServices: [serviceUUID], options: [
-                CBCentralManagerScanOptionAllowDuplicatesKey: true
-            ])
+            // 优先尝试通过缓存的 iOS 蓝牙设备 UUID 免扫描后台直连
+            if let cachedUUID = PeripheralUUIDCache.uuid(for: targetLock.macAddress),
+               let knownPeripheral = central.retrievePeripherals(withIdentifiers: [cachedUUID]).first {
+                isDirectConnecting = true
+                activePeripheral = knownPeripheral
+                knownPeripheral.delegate = self
+                central.connect(knownPeripheral, options: nil)
+
+                // 若 4 秒内直连未成功（如缓存过期），自动取消并回退到扫描模式
+                let fallback = DispatchWorkItem { [weak self] in
+                    guard let self = self, !self.hasCompleted, self.isDirectConnecting else { return }
+                    self.isDirectConnecting = false
+                    if let p = self.activePeripheral {
+                        self.centralManager.cancelPeripheralConnection(p)
+                        self.activePeripheral = nil
+                    }
+                    self.startBackgroundScan()
+                }
+                fallbackScanWorkItem = fallback
+                bleQueue.asyncAfter(deadline: .now() + 4, execute: fallback)
+            } else {
+                startBackgroundScan()
+            }
+
         case .poweredOff, .unauthorized, .unsupported:
             complete(with: .failure(ShortcutLockError.bluetoothUnavailable))
+
         default:
             break
         }
@@ -289,6 +353,8 @@ private final class HeadlessLockBLEExecutor: NSObject, CBCentralManagerDelegate,
         let macStr = macBytes.map { String(format: "%02X", $0) }.joined(separator: ":")
 
         if macStr == targetLock.macAddress.uppercased() {
+            // 缓存该门锁在当前 iPhone 上的蓝牙 UUID，供后续后台直接免扫描秒连
+            PeripheralUUIDCache.save(uuid: peripheral.identifier, for: targetLock.macAddress)
             central.stopScan()
             activePeripheral = peripheral
             peripheral.delegate = self
@@ -298,11 +364,26 @@ private final class HeadlessLockBLEExecutor: NSObject, CBCentralManagerDelegate,
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
         guard !hasCompleted else { return }
+        isDirectConnecting = false
+        fallbackScanWorkItem?.cancel()
+        fallbackScanWorkItem = nil
+        PeripheralUUIDCache.save(uuid: peripheral.identifier, for: targetLock.macAddress)
         peripheral.discoverServices([serviceUUID])
     }
 
     func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
-        complete(with: .failure(ShortcutLockError.connectFailed))
+        guard !hasCompleted else { return }
+        if isDirectConnecting {
+            // 直连失败时清除旧缓存并无缝切入扫描模式
+            isDirectConnecting = false
+            fallbackScanWorkItem?.cancel()
+            fallbackScanWorkItem = nil
+            PeripheralUUIDCache.remove(for: targetLock.macAddress)
+            activePeripheral = nil
+            startBackgroundScan()
+        } else {
+            complete(with: .failure(ShortcutLockError.connectFailed))
+        }
     }
 
     // MARK: - CBPeripheralDelegate
