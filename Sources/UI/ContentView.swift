@@ -224,10 +224,10 @@ struct ContentView: View {
                 }
                 .scrollDisabled(true)
                 .scrollContentBackground(.hidden)
-                .frame(height: 360)
-                .padding(.horizontal, -16)
+                .frame(height: 460)
+                .padding(.horizontal, -20)
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, 20)
             .padding(.bottom, 28)
         }
         .background(Color(uiColor: .systemGroupedBackground).ignoresSafeArea())
@@ -252,7 +252,7 @@ struct ContentView: View {
             .padding(.vertical, 14)
         }
         .nativeGlassButton(prominent: prominent)
-        .buttonBorderShape(.roundedRectangle(radius: 16))
+        .buttonBorderShape(.roundedRectangle(radius: 26))
     }
 
     // MARK: - 原生空状态页面
