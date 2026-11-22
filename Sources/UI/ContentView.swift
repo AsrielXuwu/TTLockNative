@@ -6,6 +6,7 @@ struct ContentView: View {
     @State private var showAddSheet = false
     @State private var showManageSheet = false
     @State private var heroCollapseProgress: CGFloat = 0
+    @Namespace private var lockIconNamespace
 
     private let gridColumns = [
         GridItem(.flexible(), spacing: 12),
@@ -30,28 +31,26 @@ struct ContentView: View {
                 }
                 ToolbarItem(placement: .principal) {
                     if let lock = store.selectedLock {
-                        let appear = min(max((heroCollapseProgress - 0.35) / 0.55, 0), 1)
+                        let appear = min(max((heroCollapseProgress - 0.42) / 0.58, 0), 1)
                         Button {
                             let action: BLEAction = (ble.lockState == .unlocked) ? .lock : .unlock
                             ble.execute(action, on: lock)
                         } label: {
-                            HStack(spacing: 6) {
-                                Image(systemName: lockHeroSymbolName)
-                                    .font(.system(size: 14, weight: .semibold))
-                                    .foregroundStyle(lockStateColor)
-                                    .contentTransition(.symbolEffect(.replace))
-
-                                Text(ble.lockState.rawValue)
-                                    .font(.subheadline.weight(.semibold))
-                                    .foregroundStyle(.primary)
-                            }
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 5)
+                            Image(systemName: lockHeroSymbolName)
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(lockStateColor)
+                                .contentTransition(.symbolEffect(.replace))
+                                .frame(width: 34, height: 34)
+                                .matchedGeometryEffect(
+                                    id: "lock-hero-icon",
+                                    in: lockIconNamespace,
+                                    isSource: heroCollapseProgress >= 0.5
+                                )
+                                .animation(.spring(response: 0.30, dampingFraction: 0.88), value: heroCollapseProgress >= 0.5)
                         }
                         .nativeGlassButton(prominent: false)
-                        .buttonBorderShape(.capsule)
-                        .disabled(ble.isBusy || appear < 0.25)
-                        .scaleEffect(0.75 + 0.25 * appear)
+                        .buttonBorderShape(.circle)
+                        .disabled(ble.isBusy || appear < 0.2)
                         .opacity(appear)
                         .accessibilityLabel(ble.lockState == .unlocked ? "闭锁" : "开锁")
                     }
@@ -129,22 +128,41 @@ struct ContentView: View {
     private func lockControlView(for lock: SmartLock) -> some View {
         ScrollView {
             VStack(spacing: 24) {
-                // 1. 顶部原生大锁图标与状态文字（随页面滑动整体缩小并收入顶栏中央）
-                let heroFade = 1.0 - min(max((heroCollapseProgress - 0.25) / 0.55, 0), 1)
-                VStack(spacing: 12) {
+                // 1. 顶部原生大锁图标状态展示（随页面上滑缩小并收入顶栏中央）
+                VStack(spacing: 12 * (1 - heroCollapseProgress)) {
+                    let toolbarAppear = min(max((heroCollapseProgress - 0.42) / 0.58, 0), 1)
+                    let iconSize = 72 - 38 * heroCollapseProgress
+                    let iconFontSize = 38 - 22 * heroCollapseProgress
+                    let statusHeight = 52 * (1 - heroCollapseProgress)
+
                     Button {
                         let action: BLEAction = (ble.lockState == .unlocked) ? .lock : .unlock
                         ble.execute(action, on: lock)
                     } label: {
                         Image(systemName: lockHeroSymbolName)
-                            .font(.system(size: 38, weight: .medium))
+                            .font(.system(size: iconFontSize, weight: .medium))
                             .foregroundStyle(lockStateColor)
                             .contentTransition(.symbolEffect(.replace))
-                            .frame(width: 72, height: 72)
+                            .frame(width: iconSize, height: iconSize)
+                            .matchedGeometryEffect(
+                                id: "lock-hero-icon",
+                                in: lockIconNamespace,
+                                isSource: heroCollapseProgress < 0.5
+                            )
+                            .animation(.spring(response: 0.30, dampingFraction: 0.88), value: heroCollapseProgress >= 0.5)
                     }
                     .nativeGlassButton(prominent: false)
                     .buttonBorderShape(.circle)
-                    .disabled(ble.isBusy || heroCollapseProgress > 0.4)
+                    .disabled(ble.isBusy || heroCollapseProgress > 0.5)
+                    .opacity(1 - toolbarAppear)
+                    .background {
+                        GeometryReader { geo in
+                            Color.clear.preference(
+                                key: HeroLockScrollOffsetKey.self,
+                                value: geo.frame(in: .named("lockScroll")).minY
+                            )
+                        }
+                    }
                     .accessibilityLabel(ble.lockState == .unlocked ? "闭锁" : "开锁")
 
                     VStack(spacing: 4) {
@@ -161,12 +179,14 @@ struct ContentView: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
+                    .frame(height: statusHeight, alignment: .top)
+                    .opacity(1 - heroCollapseProgress)
+                    .offset(y: -8 * heroCollapseProgress)
+                    .clipped()
+                    .accessibilityHidden(heroCollapseProgress > 0.85)
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.top, 8)
-                .scaleEffect(1.0 - 0.45 * heroCollapseProgress, anchor: .top)
-                .offset(y: -20 * heroCollapseProgress)
-                .opacity(heroFade)
 
                 // 2. 四宫格原生液态玻璃按钮（独立渲染，无外层裁切）
                 LazyVGrid(columns: gridColumns, spacing: 12) {
@@ -271,10 +291,10 @@ struct ContentView: View {
             .padding(.horizontal, 20)
             .padding(.bottom, 28)
         }
-        .onScrollGeometryChange(for: CGFloat.self) { geo in
-            geo.contentOffset.y + geo.contentInsets.top
-        } action: { _, offset in
-            let progress = min(max(offset / 85.0, 0), 1)
+        .coordinateSpace(name: "lockScroll")
+        .onPreferenceChange(HeroLockScrollOffsetKey.self) { minY in
+            // Begin collapsing as the hero approaches the navigation bar.
+            let progress = min(max((12.0 - minY) / 56.0, 0), 1)
             if abs(heroCollapseProgress - progress) > 0.002 {
                 heroCollapseProgress = progress
             }
@@ -393,5 +413,12 @@ struct ManageLocksView: View {
                 }
             }
         }
+    }
+}
+
+private struct HeroLockScrollOffsetKey: PreferenceKey {
+    static var defaultValue: CGFloat = 8.0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
     }
 }
