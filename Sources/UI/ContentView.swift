@@ -22,7 +22,6 @@ struct ContentView: View {
                 }
             }
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     if let lock = store.selectedLock {
@@ -31,7 +30,7 @@ struct ContentView: View {
                 }
                 ToolbarItem(placement: .principal) {
                     if let lock = store.selectedLock {
-                        let appear = max(0, (heroCollapseProgress - 0.35) / 0.65)
+                        let appear = min(max((heroCollapseProgress - 0.45) / 0.50, 0), 1)
                         Button {
                             let action: BLEAction = (ble.lockState == .unlocked) ? .lock : .unlock
                             ble.execute(action, on: lock)
@@ -45,7 +44,7 @@ struct ContentView: View {
                         .nativeGlassButton(prominent: false)
                         .buttonBorderShape(.circle)
                         .disabled(ble.isBusy || appear < 0.2)
-                        .scaleEffect(0.5 + 0.5 * appear)
+                        .scaleEffect(0.75 + 0.25 * appear)
                         .opacity(appear)
                         .accessibilityLabel(ble.lockState == .unlocked ? "闭锁" : "开锁")
                     }
@@ -125,7 +124,7 @@ struct ContentView: View {
             VStack(spacing: 24) {
                 // 1. 顶部原生大锁图标状态展示（随页面上滑缩小并收入顶栏中央）
                 VStack(spacing: 12) {
-                    let heroFade = 1.0 - max(0, (heroCollapseProgress - 0.35) / 0.65)
+                    let heroFade = 1.0 - min(max((heroCollapseProgress - 0.45) / 0.50, 0), 1)
                     Button {
                         let action: BLEAction = (ble.lockState == .unlocked) ? .lock : .unlock
                         ble.execute(action, on: lock)
@@ -139,7 +138,7 @@ struct ContentView: View {
                     .nativeGlassButton(prominent: false)
                     .buttonBorderShape(.circle)
                     .disabled(ble.isBusy || heroCollapseProgress > 0.5)
-                    .scaleEffect(1.0 - 0.55 * heroCollapseProgress, anchor: .bottom)
+                    .scaleEffect(1.0 - 0.528 * heroCollapseProgress, anchor: .top)
                     .opacity(heroFade)
                     .background {
                         GeometryReader { geo in
@@ -274,41 +273,10 @@ struct ContentView: View {
         }
         .coordinateSpace(name: "lockScroll")
         .onPreferenceChange(HeroLockScrollOffsetKey.self) { minY in
-            let progress = min(max((8.0 - minY) / 64.0, 0), 1)
+            let progress = min(max((8.0 - minY) / 44.0, 0), 1)
             if abs(heroCollapseProgress - progress) > 0.005 {
                 heroCollapseProgress = progress
             }
-        }
-        .overlay(alignment: .top) {
-            GeometryReader { geo in
-                let topInset = geo.safeAreaInsets.top
-                let barHeight: CGFloat = 56
-                let totalHeight = topInset + barHeight
-                let solidRatio = (topInset + 36) / totalHeight
-
-                ZStack {
-                    Rectangle()
-                        .fill(.ultraThinMaterial)
-                    Rectangle()
-                        .fill(Color(uiColor: .systemGroupedBackground).opacity(0.35))
-                }
-                .frame(height: totalHeight)
-                .mask(
-                    LinearGradient(
-                        stops: [
-                            .init(color: .black, location: 0),
-                            .init(color: .black, location: solidRatio),
-                            .init(color: .black.opacity(0.55), location: solidRatio + (1 - solidRatio) * 0.55),
-                            .init(color: .clear, location: 1)
-                        ],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                )
-                .ignoresSafeArea(edges: .top)
-            }
-            .frame(height: 0)
-            .allowsHitTesting(false)
         }
         .background(Color(uiColor: .systemGroupedBackground).ignoresSafeArea())
     }
