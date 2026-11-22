@@ -5,6 +5,10 @@ struct ContentView: View {
     @EnvironmentObject var ble: TTLockBLEManager
     @State private var showAddSheet = false
     @State private var showManageSheet = false
+
+    // 滚动测量与顶栏收起动画状态（基于外层视口与内层内容的真实全局坐标差计算）
+    @State private var containerTop: CGFloat? = nil
+    @State private var contentTop: CGFloat? = nil
     @State private var heroCollapseProgress: CGFloat = 0
 
     private let gridColumns = [
@@ -23,30 +27,36 @@ struct ContentView: View {
             }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                // 1. 左侧门锁切换菜单：在未收起时显示，当大锁开始收起到顶栏时平滑淡出，避免与顶栏中央胶囊冲突
                 ToolbarItem(placement: .topBarLeading) {
                     if let lock = store.selectedLock {
                         lockSwitcherMenu(currentLock: lock)
                             .opacity(max(1.0 - heroCollapseProgress * 2.5, 0))
+                            .allowsHitTesting(heroCollapseProgress < 0.4)
                     }
                 }
+
+                // 2. 顶栏居中仿 iMessage 动态收起区域：大锁图标与门锁胶囊无缝渐入居中
                 ToolbarItem(placement: .principal) {
                     if let lock = store.selectedLock {
                         VStack(spacing: 2) {
+                            // 顶栏微型圆形锁按钮（仿 iMessage 头像位置）
                             Button {
                                 let action: BLEAction = (ble.lockState == .unlocked) ? .lock : .unlock
                                 ble.execute(action, on: lock)
                             } label: {
                                 Image(systemName: lockHeroSymbolName)
-                                    .font(.system(size: 14, weight: .semibold))
+                                    .font(.system(size: 13, weight: .semibold))
                                     .foregroundStyle(lockStateColor)
                                     .contentTransition(.symbolEffect(.replace))
-                                    .frame(width: 30, height: 30)
+                                    .frame(width: 28, height: 28)
                             }
                             .nativeGlassButton(prominent: false)
                             .buttonBorderShape(.circle)
                             .disabled(ble.isBusy || heroCollapseProgress < 0.3)
                             .accessibilityLabel(ble.lockState == .unlocked ? "闭锁" : "开锁")
 
+                            // 仿 iMessage 居中胶囊切换菜单
                             lockCapsuleMenu(currentLock: lock)
                         }
                         .scaleEffect(0.85 + 0.15 * heroCollapseProgress)
@@ -55,6 +65,7 @@ struct ContentView: View {
                         .allowsHitTesting(heroCollapseProgress > 0.6)
                     }
                 }
+
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         showAddSheet = true
@@ -71,6 +82,9 @@ struct ContentView: View {
                 ManageLocksView()
             }
             .onAppear {
+                containerTop = nil
+                contentTop = nil
+                heroCollapseProgress = 0
                 if let lock = store.selectedLock, ble.lockState == .unknown, !ble.isBusy {
                     ble.syncLockState(for: lock, resetDisplay: true)
                 }
@@ -81,6 +95,9 @@ struct ContentView: View {
                 }
             }
             .onChange(of: store.selectedLockId) { _, _ in
+                containerTop = nil
+                contentTop = nil
+                heroCollapseProgress = 0
                 if !showAddSheet, let lock = store.selectedLock {
                     ble.syncLockState(for: lock, resetDisplay: true)
                 }
@@ -88,7 +105,7 @@ struct ContentView: View {
         }
     }
 
-    // MARK: - 顶部原生门锁切换菜单
+    // MARK: - 顶部原生门锁切换菜单（未收起时左侧常驻）
 
     private func lockSwitcherMenu(currentLock: SmartLock) -> some View {
         Menu {
@@ -163,36 +180,24 @@ struct ContentView: View {
             }
             .foregroundStyle(.primary)
             .padding(.horizontal, 9)
-            .padding(.vertical, 3)
+            .padding(.vertical, 2.5)
             .background(
                 Capsule()
                     .fill(.ultraThinMaterial)
                     .overlay(
                         Capsule()
-                            .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)
+                            .strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.5)
                     )
             )
         }
     }
 
-    // MARK: - 主界面（无裁切滚动容器 + 原生分组卡片）
+    // MARK: - 主界面（双探针无偏滚动测量 + 原生分组布局）
 
     private func lockControlView(for lock: SmartLock) -> some View {
         ScrollView {
             VStack(spacing: 24) {
-                // 顶部滚动测量探针（无侵入测量真实滚动距离）
-                Color.clear
-                    .frame(height: 0)
-                    .background {
-                        GeometryReader { geo in
-                            Color.clear.preference(
-                                key: HeroLockScrollOffsetKey.self,
-                                value: geo.frame(in: .named("lockScroll")).minY
-                            )
-                        }
-                    }
-
-                // 1. 顶部原生大锁图标与状态展示（随页面滑动进入顶栏范围时平滑收起至顶栏中央）
+                // 1. 顶部原生大锁图标与状态展示（滑动进入顶栏时平滑收起至顶栏中央，遵循 Apple 原生层级规范）
                 VStack(spacing: 12) {
                     Button {
                         let action: BLEAction = (ble.lockState == .unlocked) ? .lock : .unlock
@@ -266,7 +271,7 @@ struct ContentView: View {
                 }
                 .disabled(ble.isBusy)
 
-                // 3 & 4. 门锁状态与设备信息（原生 Form，与添加门锁界面完全一致）
+                // 3 & 4. 门锁状态与设备信息（原生 Form 呈现）
                 Form {
                     Section("门锁状态") {
                         LabeledContent("当前状态") {
@@ -332,18 +337,49 @@ struct ContentView: View {
             }
             .padding(.horizontal, 20)
             .padding(.bottom, 28)
+            // 内容绝对顶部探针：跟随内容滚动，有实体尺寸，SwiftUI 布局引擎每帧稳定派发更新
+            .background(
+                GeometryReader { geo in
+                    Color.clear.preference(
+                        key: ScrollContentTopKey.self,
+                        value: geo.frame(in: .global).minY
+                    )
+                }
+            )
         }
-        .coordinateSpace(name: "lockScroll")
-        .onPreferenceChange(HeroLockScrollOffsetKey.self) { minY in
-            let scrollDistance = -minY
-            let startOffset: CGFloat = 8.0
-            let endOffset: CGFloat = 88.0
-            let progress = min(max((scrollDistance - startOffset) / (endOffset - startOffset), 0), 1)
-            if abs(heroCollapseProgress - progress) > 0.003 {
-                heroCollapseProgress = progress
+        .scrollBounceBehavior(.always)
+        // 视口容器绝对顶部探针：固定于 ScrollView 视口顶部，两者差值即为绝对精确的无偏滚动距离
+        .background(
+            GeometryReader { geo in
+                Color.clear.preference(
+                    key: ScrollContainerTopKey.self,
+                    value: geo.frame(in: .global).minY
+                )
             }
+        )
+        .onPreferenceChange(ScrollContainerTopKey.self) { value in
+            containerTop = value
+            updateScrollProgress()
+        }
+        .onPreferenceChange(ScrollContentTopKey.self) { value in
+            contentTop = value
+            updateScrollProgress()
         }
         .background(Color(uiColor: .systemGroupedBackground).ignoresSafeArea())
+    }
+
+    // MARK: - 滚动进度精确计算
+
+    private func updateScrollProgress() {
+        guard let container = containerTop, let content = contentTop else { return }
+        let scrollDistance = max(0, container - content)
+        // 门锁大图标进入顶栏范围开始收起（约 8pt），滑动约 74pt 完成完全收起至顶栏
+        let startOffset: CGFloat = 8.0
+        let endOffset: CGFloat = 82.0
+        let progress = min(max((scrollDistance - startOffset) / (endOffset - startOffset), 0), 1.0)
+        if abs(heroCollapseProgress - progress) > 0.002 {
+            heroCollapseProgress = progress
+        }
     }
 
     // MARK: - 原生宫格按钮
@@ -460,7 +496,16 @@ struct ManageLocksView: View {
     }
 }
 
-private struct HeroLockScrollOffsetKey: PreferenceKey {
+// MARK: - 滚动位置 Preference Keys
+
+private struct ScrollContainerTopKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0.0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
+private struct ScrollContentTopKey: PreferenceKey {
     static var defaultValue: CGFloat = 0.0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = nextValue()
