@@ -22,6 +22,7 @@ struct ContentView: View {
                 }
             }
             .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     if let lock = store.selectedLock {
@@ -277,6 +278,37 @@ struct ContentView: View {
             if abs(heroCollapseProgress - progress) > 0.005 {
                 heroCollapseProgress = progress
             }
+        }
+        .overlay(alignment: .top) {
+            GeometryReader { geo in
+                let topInset = geo.safeAreaInsets.top
+                let barHeight: CGFloat = 56
+                let totalHeight = topInset + barHeight
+                let solidRatio = (topInset + 36) / totalHeight
+
+                ZStack {
+                    Rectangle()
+                        .fill(.ultraThinMaterial)
+                    Rectangle()
+                        .fill(Color(uiColor: .systemGroupedBackground).opacity(0.35))
+                }
+                .frame(height: totalHeight)
+                .mask(
+                    LinearGradient(
+                        stops: [
+                            .init(color: .black, location: 0),
+                            .init(color: .black, location: solidRatio),
+                            .init(color: .black.opacity(0.55), location: solidRatio + (1 - solidRatio) * 0.55),
+                            .init(color: .clear, location: 1)
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .ignoresSafeArea(edges: .top)
+            }
+            .frame(height: 0)
+            .allowsHitTesting(false)
         }
         .background(Color(uiColor: .systemGroupedBackground).ignoresSafeArea())
     }
